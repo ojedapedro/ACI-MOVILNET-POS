@@ -35,14 +35,15 @@ function setupSheets() {
   }
 
   // 2. Setup Inventory Sheet (Mock Data if empty)
+  // Nota: Se asume que la hoja ya existe con el formato de la imagen (Columna R en adelante)
   let invSheet = ss.getSheetByName(SHEET_INVENTORY);
   if (!invSheet) {
     invSheet = ss.insertSheet(SHEET_INVENTORY);
-    invSheet.appendRow(['IMEI', 'Nombre Producto', 'Precio USD', 'Stock']);
-    invSheet.getRange(1, 1, 1, 4).setFontWeight('bold').setBackground('#FF6600').setFontColor('white');
-    // Sample data
-    invSheet.appendRow(['12345', 'Samsung A15', 180, 10]);
-    invSheet.appendRow(['67890', 'Redmi 13C', 140, 15]);
+    // Solo crea estructura básica si no existe, pero tu hoja ya tiene datos en col R
+    invSheet.getRange('R2').setValue('IMEI');
+    invSheet.getRange('S2').setValue('Nombre Producto');
+    invSheet.getRange('U2').setValue('Precio Base');
+    invSheet.getRange('V2').setValue('Stock');
   }
 
   // 3. Setup Config Sheet
@@ -102,30 +103,53 @@ function saveExchangeRate(newRate) {
 
 /**
  * Fetch product by IMEI or Name from PROCDINVENT
+ * CONSULTA: Columnas R, S, U, V según imagen.
  */
 function getProductByTerm(term) {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sheet = ss.getSheetByName(SHEET_INVENTORY);
   if (!sheet) return null;
   
-  const data = sheet.getDataRange().getValues(); 
-  // Expecting Columns: A=IMEI, B=Nombre, C=Precio USD, D=Stock
+  // Usamos getDisplayValues() para obtener todo como TEXTO.
+  // Esto evita que los IMEI largos se conviertan a notación científica o pierdan precisión.
+  const data = sheet.getDataRange().getDisplayValues(); 
   
-  const search = String(term).toLowerCase().trim();
+  // Limpiamos el término de búsqueda (quitamos espacios y convertimos a texto)
+  const search = String(term).trim().toLowerCase();
   
-  for (let i = 1; i < data.length; i++) {
-    const row = data[i];
-    // Explicit string conversion for robust matching (e.g. if Excel stored '123' as number)
-    const imei = String(row[0]).toLowerCase().trim();
-    const name = String(row[1]).toLowerCase();
+  // Según imagen: Encabezados en Fila 2 (índice 1), Datos empiezan en Fila 3 (índice 2)
+  // Índices de columnas (A=0, ..., Q=16, R=17, S=18, T=19, U=20, V=21)
+  const COL_IMEI = 17;   // Columna R
+  const COL_NAME = 18;   // Columna S
+  const COL_PRICE = 20;  // Columna U
+  const COL_STOCK = 21;  // Columna V
 
-    // Check strict match for IMEI or partial match for Name
+  // Empezamos desde i=2 porque la fila 1 (índice 0) y fila 2 (índice 1) son encabezados o vacíos según imagen
+  for (let i = 2; i < data.length; i++) {
+    const row = data[i];
+    
+    // Verificamos que la fila tenga suficientes columnas
+    if (row.length <= COL_STOCK) continue;
+
+    // Obtenemos valores limpios
+    const imei = String(row[COL_IMEI]).trim().toLowerCase();
+    const name = String(row[COL_NAME]).toLowerCase();
+    
+    // Lógica de precio: quitar símbolos de moneda si existen (ej: "$2.00" -> "2.00")
+    let priceStr = String(row[COL_PRICE]).replace(/[^0-9.,]/g, '').replace(',', '.');
+    const price = parseFloat(priceStr) || 0;
+
+    const stock = parseInt(String(row[COL_STOCK]).replace(/[^0-9]/g, '')) || 0;
+
+    // Comparación: 
+    // 1. IMEI exacto (texto vs texto)
+    // 2. Nombre parcial (si escribes más de 3 letras)
     if (imei === search || (search.length > 3 && name.includes(search))) {
       return {
-        imei: row[0],
-        name: row[1],
-        priceUSD: Number(row[2]),
-        stock: Number(row[3])
+        imei: row[COL_IMEI], // Devolvemos el valor original de la celda
+        name: row[COL_NAME],
+        priceUSD: price,
+        stock: stock
       };
     }
   }
@@ -149,7 +173,6 @@ function processSale(saleDataJSON) {
     const pdfUrl = createPDF(saleData, saleId);
     
     // 2. Save to Sheet
-    // Columns: Fecha, ID, Cliente, Cedula, Telefono, Items, TotalUSD, Tasa, TotalBs, FormaPago, Financiamiento, Obs, PDF
     sheet.appendRow([
       new Date(),
       saleId,
@@ -186,16 +209,12 @@ function getSalesHistory() {
   if (!sheet) return [];
   
   const rawData = sheet.getDataRange().getValues();
-  if (rawData.length < 2) return []; // Only headers
+  if (rawData.length < 2) return [];
 
-  // Sort by date descending (assuming row addition order is chronological, we reverse it)
-  // Skip header row
   const rows = rawData.slice(1).reverse();
   
-  // Map relevant columns to object
-  // Headers: 0:Fecha, 1:ID, 2:Cliente, 3:Cedula, 4:Tel, 5:Items, 6:TotalUSD, 7:Tasa, 8:TotalBs, 9:Pago, 10:Financ, 11:Obs, 12:PDF
   return rows.map(row => ({
-    date: row[0], // Will be serialized as ISO string by GAS
+    date: row[0],
     id: row[1],
     client: row[2],
     cedula: row[3],
@@ -215,7 +234,6 @@ function createPDF(data, saleId) {
   const totalBs = data.totalUSD * data.exchangeRate;
   const logoUrl = "https://i.ibb.co/hFq3BtD9/Movilnet-logo-0.png";
   
-  // Helper for currency
   const fmtUSD = (n) => `$${n.toFixed(2)}`;
   const fmtBs = (n) => `Bs. ${n.toFixed(2)}`;
 
@@ -264,8 +282,6 @@ function createPDF(data, saleId) {
   let html = `
     <html>
       <body style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; padding: 40px; color: #333;">
-        
-        <!-- Header -->
         <table style="width: 100%; border-bottom: 2px solid #FF6600; padding-bottom: 20px; margin-bottom: 20px;">
           <tr>
             <td valign="top" style="width: 60%;">
@@ -282,8 +298,6 @@ function createPDF(data, saleId) {
             </td>
           </tr>
         </table>
-
-        <!-- Customer -->
         <div style="margin-bottom: 20px; padding: 15px; background-color: #f4f6f8; border-radius: 5px;">
            <table style="width: 100%; font-size: 13px;">
              <tr>
@@ -293,8 +307,6 @@ function createPDF(data, saleId) {
              </tr>
            </table>
         </div>
-
-        <!-- Items -->
         <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
           <thead>
             <tr style="background-color: #003399; color: white;">
@@ -318,17 +330,13 @@ function createPDF(data, saleId) {
              </tr>
           </tfoot>
         </table>
-
         ${installmentsHtml}
-
         <div style="margin-top: 20px; font-size: 12px; color: #777; border-left: 3px solid #ddd; padding-left: 10px;">
            <strong>Observaciones:</strong> ${data.observations || 'Ninguna'}
         </div>
-
         <div style="margin-top: 50px; text-align: center; font-size: 11px; color: #aaa; border-top: 1px solid #eee; padding-top: 10px;">
            Gracias por preferir a ACI Movilnet. La mejor tecnología a tu alcance.
         </div>
-
       </body>
     </html>
   `;
@@ -337,7 +345,6 @@ function createPDF(data, saleId) {
   const pdf = blob.getAs(MimeType.PDF).setName(`Recibo_${saleId}.pdf`);
   const file = DriveApp.createFile(pdf);
   
-  // Public link for sharing via WhatsApp
   file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
   
   return file.getUrl();
