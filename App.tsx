@@ -114,10 +114,10 @@ const App = () => {
         addToCart(product);
         setSearchTerm(''); // Clear input for next scan
       } else {
-        alert('Producto no encontrado en inventario (PROCDINVENT).');
+        alert(`Producto no encontrado. \n\nVerifique que el IMEI "${searchTerm}" esté registrado correctamente en la hoja PROCDINVENT de su Google Sheet.`);
       }
     } catch (e) {
-      alert('Error al buscar producto.');
+      alert('Error de conexión al buscar producto.');
     } finally {
       setIsSearching(false);
     }

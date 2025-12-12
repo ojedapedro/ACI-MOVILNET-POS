@@ -115,7 +115,8 @@ function getProductByTerm(term) {
   
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
-    const imei = String(row[0]).toLowerCase();
+    // Explicit string conversion for robust matching (e.g. if Excel stored '123' as number)
+    const imei = String(row[0]).toLowerCase().trim();
     const name = String(row[1]).toLowerCase();
 
     // Check strict match for IMEI or partial match for Name
