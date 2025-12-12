@@ -1,0 +1,8 @@
+{
+  "name": "ACI Movilnet POS",
+  "description": "Sistema de Punto de Venta profesional para ACI Movilnet con gestión de inventario, tasas de cambio y financiamiento.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
